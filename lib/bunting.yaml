@@ -1,0 +1,23 @@
+channels:
+  - bioconda
+  - conda-forge
+  - r
+  - nodefaults
+
+dependencies:
+  - python=3.7.1 
+  - pandas
+  - numpy
+  - h5py
+  - jupyter
+  - java-jdk
+  - emboss
+  - sra-tools
+  - matplotlib
+  - seaborn
+  - memory_profiler
+  - samtools
+  - sra-tools
+  - scikit-learn
+  - scikit-bio
+  - ete3
