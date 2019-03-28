@@ -3,8 +3,8 @@ import sys
 import glob
 import time
 import logging
-from bunting.fasta import Fasta
-from bunting.fastq import Fastq
+from flock.fasta import Fasta
+from flock.fastq import Fastq
 from collections import namedtuple
 
 #Create logger

@@ -7,8 +7,8 @@ import struct
 import pandas as pd
 from collections import OrderedDict
 from collections import namedtuple
-from bunting.kmerize import Kmer
-from bunting.seq import Seq
+from flock.kmerize import Kmer
+from flock.seq import Seq
 
 class IKC:
     # TODO: Search function for k-mer counts from minimizer bins

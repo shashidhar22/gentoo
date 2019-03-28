@@ -5,9 +5,9 @@ import heapq
 import logging
 import subprocess
 import numpy as np
-from bunting.seq import Seq
-from bunting.fasta import Fasta
-from bunting.fastq import Fastq
+from flock.seq import Seq
+from flock.fasta import Fasta
+from flock.fastq import Fastq
 from collections import namedtuple
 
 class Kmer:
