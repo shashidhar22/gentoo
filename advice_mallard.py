@@ -18,6 +18,8 @@ from ete3 import Tree, faces, TreeStyle
 def index(ref_path):
     ref_files = glob.glob('{0}/fasta/*.fasta'.format(ref_path))
     out_files = list()
+    if not os.path.exists('{0}/dkc'.format(ref_path)):
+        os.mkdir('{0}/dkc'.format(ref_path))
     for files in ref_files:
         out_file = '{0}/dkc/{1}.dkc'.format(ref_path, os.path.splitext(os.path.basename(files))[0])
         out_files.append(out_file)
@@ -36,10 +38,10 @@ def stream(kmer_file):
         yield(kmer, count)
 
 def merge(file_list):
-    fone = file_list[-1]
+    fone = file_list[0]
     ftwo = file_list[1]
-    oname = fone.split('_')[1]
-    tname = ftwo.split('_')[1]
+    oname = os.path.basename(fone).split('_')[1]
+    tname = os.path.basename(ftwo).split('_')[1]
     merge_logger = logging.getLogger('PyFinch.{0}.{1}'.format(oname, tname))
     ostream = stream(fone)
     tstream = stream(ftwo)
@@ -52,8 +54,6 @@ def merge(file_list):
     #fonetwos = 0
     intersection = 0
     union = 0
-    merge_logger.debug('Starting comparison between {0} and {1}'.format(oname,
-                       tname))
     while omer and tmer:
         if omer[0] == tmer[0]:
             #fones += omer[1]**2
@@ -81,14 +81,14 @@ def merge(file_list):
         #ftwos += 0 **2
         #fonetwos += omer[1] * 0
         #print(omer, fone, ftwo)
-        union += omer[2]
+        union += omer[1]
         omer = next(ostream, None)
 
     while tmer:
         #fones += 0 **2
         #ftwos += tmer[1]**2
         #fonetwos += 0 * tmer[1]
-        union += tmer[2]
+        union += tmer[1]
         tmer = next(tstream, None)
     ## Since a jaccard index depends on just binary presence or absence scenarios,
     ## the similarity of samples can be determine by using a similarity ratio
@@ -97,7 +97,6 @@ def merge(file_list):
     ##  yki = abundance of kth species in quadrat i
     #similarity = fonetwos / (fones + ftwos - fonetwos)
     #distance = 1 - similarity
-    #print(similarity)
     similarity = intersection/union
     distance = 1 - similarity
     merge_logger.debug('Distance between {0} and {1} = {2}'.format(
@@ -109,7 +108,7 @@ def splitter(ref_path):
     combinations = list(itertools.product(file_list, file_list))
     splitter_logger = logging.getLogger('PyFinch')
     splitter_logger.debug('Performing {0} pairwise comparisons'.format(len(combinations)))
-    pools = Pool(10)
+    pools = Pool(4)
     jaccard_list = pools.map(merge, combinations)
     return(jaccard_list)
 
@@ -130,13 +129,6 @@ def pairwise_to_distance(jaccard_list):
     #np.savetxt('Plasmodium.dist', jaccard_matrix, delimiter=',')
     #print(jaccard_matrix.shape)
 
-def plot_tree(matrix_file):
-    jaccard_matrix = DistanceMatrix(jaccard_matrix, samples)
-    newick_str = nj(jaccard_matrix, result_constructor=str)
-    tree = Tree(newick_str)
-    tree.render("node_background.png", w=400)
-    #print(jaccard_matrix)
-
 if __name__ == '__main__':
     ref_path = os.path.abspath(sys.argv[1])
     #fone_path = sys.argv[2]
@@ -153,7 +145,7 @@ if __name__ == '__main__':
     # Add the handlers to the logger
     logger.addHandler(ch)
 
-    out_file = index(ref_path)
+    #out_file = index(ref_path)
     #intersection, union, jaccard  = merge((fone_path, ftwo_path))
     jaccard_list = splitter(ref_path)
     pairwise_to_distance(jaccard_list)
