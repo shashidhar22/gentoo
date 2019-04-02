@@ -9,11 +9,28 @@ import pandas as pd
 import numpy as np
 from pprint import pprint
 from multiprocessing import Pool
+from flock.prepinputs import Prepper
 from flock.fasta import Fasta
 from flock.ikc import IKC
 from skbio import DistanceMatrix
 from skbio.tree import nj
 from ete3 import Tree, faces, TreeStyle
+
+def fqindex(sam_path):
+    sam_files = Prepper('{0}/fastq'.format(sam_path), 'fasterq-dump').prepInputs()
+    out_files = list()
+    if not os.path.exists('{0}/dkc'.format(ref_path)):
+        os.mkdir('{0}/dkc'.format(ref_path))
+    for files, sample in sam_files.items():
+        out_file = '{0}/dkc/{1}_{2}.dkc'.format(sam_path, 
+                                                sample.sample, sample.country)
+        out_files.append(out_file)
+        kcmd = ['lib/kanalyze/count', '-t', '4', '-m', 'dec', '-k', '31', '-c', 
+                'kmercount:2', '-rcanonical', '--seqfilter' , 'sanger:20', 
+                '-o', out_file] +  sample.files
+        krun = subprocess.Popen(kcmd, shell=False)
+        krun.wait()
+    return(out_files)
 
 def index(ref_path):
     ref_files = glob.glob('{0}/fasta/*.fasta'.format(ref_path))
@@ -23,7 +40,7 @@ def index(ref_path):
     for files in ref_files:
         out_file = '{0}/dkc/{1}.dkc'.format(ref_path, os.path.splitext(os.path.basename(files))[0])
         out_files.append(out_file)
-        kcmd = ['lib/kanalyze/count', '-t', '15', '-m', 'dec', '-k', '31', '-o', out_file,
+        kcmd = ['lib/kanalyze/count', '-t', '4', '-m', 'dec', '-k', '31', '-o', out_file,
                 files]
         krun = subprocess.Popen(kcmd, shell=False)
         krun.wait()
@@ -40,8 +57,8 @@ def stream(kmer_file):
 def merge(file_list):
     fone = file_list[0]
     ftwo = file_list[1]
-    oname = os.path.basename(fone).split('_')[1]
-    tname = os.path.basename(ftwo).split('_')[1]
+    oname = os.path.splitext(os.path.basename(fone))[0]
+    tname = os.path.splitext(os.path.basename(ftwo))[0]
     merge_logger = logging.getLogger('PyFinch.{0}.{1}'.format(oname, tname))
     ostream = stream(fone)
     tstream = stream(ftwo)
@@ -124,7 +141,7 @@ def pairwise_to_distance(jaccard_list):
     newick_str = nj(jaccard_matrix, result_constructor=str)
     print(newick_str)
     tree = Tree(newick_str)
-    tree.set_outgroup(tree&"Pgallinaceum8A")
+    #tree.set_outgroup(tree&"Pgallinaceum8A")
     print(tree)
     #np.savetxt('Plasmodium.dist', jaccard_matrix, delimiter=',')
     #print(jaccard_matrix.shape)
@@ -144,8 +161,8 @@ if __name__ == '__main__':
     ch.setFormatter(formatter)
     # Add the handlers to the logger
     logger.addHandler(ch)
-
-    #out_file = index(ref_path)
+    out_file = fqindex(ref_path)
+    out_file = index(ref_path)
     #intersection, union, jaccard  = merge((fone_path, ftwo_path))
     jaccard_list = splitter(ref_path)
     pairwise_to_distance(jaccard_list)
