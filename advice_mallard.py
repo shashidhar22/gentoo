@@ -125,7 +125,7 @@ def splitter(ref_path):
     combinations = list(itertools.product(file_list, file_list))
     splitter_logger = logging.getLogger('PyFinch')
     splitter_logger.debug('Performing {0} pairwise comparisons'.format(len(combinations)))
-    pools = Pool(4)
+    pools = Pool(30)
     jaccard_list = pools.map(merge, combinations)
     return(jaccard_list)
 
