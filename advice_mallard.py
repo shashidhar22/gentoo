@@ -122,12 +122,17 @@ def merge(file_list):
 
 def splitter(ref_path):
     file_list = glob.glob('{0}/dkc/*.dkc'.format(ref_path))
-    combinations = list(itertools.product(file_list, file_list))
+    products = list()
+    combinations = list(itertools.combinations_with_replacement(file_list, 2))
     splitter_logger = logging.getLogger('PyFinch')
     splitter_logger.debug('Performing {0} pairwise comparisons'.format(len(combinations)))
     pools = Pool(4)
     jaccard_list = pools.map(merge, combinations)
-    return(jaccard_list)
+    for groups in jaccard_list:
+        products.append(list(groups))
+        if [groups[1], groups[0], groups[2]] not in products:
+            products.append([groups[1], groups[0], groups[2]])
+    return(products)
 
 def pairwise_to_distance(jaccard_list):
     jaccard_table = pd.DataFrame(jaccard_list, columns=['SampleA', 'SampleB', 'Distance'])
@@ -141,7 +146,7 @@ def pairwise_to_distance(jaccard_list):
     newick_str = nj(jaccard_matrix, result_constructor=str)
     print(newick_str)
     tree = Tree(newick_str)
-    #tree.set_outgroup(tree&"Pgallinaceum8A")
+    tree.set_outgroup(tree&"PlasmoDB-41_Pgallinaceum8A_Genome")
     print(tree)
     #np.savetxt('Plasmodium.dist', jaccard_matrix, delimiter=',')
     #print(jaccard_matrix.shape)
@@ -161,8 +166,8 @@ if __name__ == '__main__':
     ch.setFormatter(formatter)
     # Add the handlers to the logger
     logger.addHandler(ch)
-    out_file = fqindex(ref_path)
-    out_file = index(ref_path)
+    #out_file = fqindex(ref_path)
+    #out_file = index(ref_path)
     #intersection, union, jaccard  = merge((fone_path, ftwo_path))
     jaccard_list = splitter(ref_path)
     pairwise_to_distance(jaccard_list)
