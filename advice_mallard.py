@@ -15,6 +15,7 @@ from flock.ikc import IKC
 from skbio import DistanceMatrix
 from skbio.tree import nj
 from ete3 import Tree, faces, TreeStyle
+from memory_profiler import profile
 
 def fqindex(sam_path):
     sam_files = Prepper('{0}/fastq'.format(sam_path), 'fasterq-dump').prepInputs()
@@ -32,28 +33,33 @@ def fqindex(sam_path):
         krun.wait()
     return(out_files)
 
+def faindex(files):
+    out_file = '{0}/dkc/{1}.dkc'.format(ref_path, os.path.splitext(os.path.basename(files))[0])
+    tmp_loc = '{0}/tmp/{1}'.format(ref_path, os.path.splitext(os.path.basename(files))[0])
+    if not os.path.exists(tmp_loc):
+        os.mkdir(tmp_loc)
+    kcmd = ['lib/kanalyze/count', '-t', '2', '-m', 'dec', '-k', '31', '--temploc', tmp_loc,
+            '-o', out_file, files]
+    krun = subprocess.Popen(kcmd, shell=False)
+    krun.wait()
+    return(files)
+
 def index(ref_path):
-    ref_files = glob.glob('{0}/fasta/*.fasta'.format(ref_path))
+    ref_files = glob.glob('{0}/fasta/*.fas'.format(ref_path))
     out_files = list()
     if not os.path.exists('{0}/dkc'.format(ref_path)):
         os.mkdir('{0}/dkc'.format(ref_path))
-    for files in ref_files:
-        out_file = '{0}/dkc/{1}.dkc'.format(ref_path, os.path.splitext(os.path.basename(files))[0])
-        out_files.append(out_file)
-        kcmd = ['lib/kanalyze/count', '-t', '4', '-m', 'dec', '-k', '31', '-o', out_file,
-                files]
-        krun = subprocess.Popen(kcmd, shell=False)
-        krun.wait()
-    return(out_files)
+    pools = Pool(10)
+    out_list = pools.map(faindex, ref_files)
+    return(out_list)
 
 def stream(kmer_file):
-    kmer_reader = open(kmer_file, buffering=13107200)
+    kmer_reader = open(kmer_file, buffering=1)
     for lines in kmer_reader:
         lines = lines.strip().split('\t')
         kmer = int(lines[0])
         count = int(lines[1])
         yield(kmer, count)
-
 def merge(file_list):
     fone = file_list[0]
     ftwo = file_list[1]
@@ -121,12 +127,12 @@ def merge(file_list):
     return(oname, tname, distance)
 
 def splitter(ref_path):
-    file_list = glob.glob('{0}/dkc/*.dkc'.format(ref_path))
+    file_list = glob.glob('{0}/dkc41/*.dkc'.format(ref_path))
     products = list()
     combinations = list(itertools.combinations_with_replacement(file_list, 2))
     splitter_logger = logging.getLogger('PyFinch')
     splitter_logger.debug('Performing {0} pairwise comparisons'.format(len(combinations)))
-    pools = Pool(30)
+    pools = Pool(25)
     jaccard_list = pools.map(merge, combinations)
     for groups in jaccard_list:
         products.append(list(groups))
@@ -134,9 +140,9 @@ def splitter(ref_path):
             products.append([groups[1], groups[0], groups[2]])
     return(products)
 
-def pairwise_to_distance(jaccard_list):
+def pairwise_to_distance(jaccard_list, output, outgroup):
     jaccard_table = pd.DataFrame(jaccard_list, columns=['SampleA', 'SampleB', 'Distance'])
-    jaccard_table.to_csv('Plasmodium.dist', header=True, index=False)
+    jaccard_table.to_csv('{0}.dist'.format(output), header=True, index=False)
     jaccard_matrix = jaccard_table.pivot(index='SampleA', columns='SampleB', values='Distance')
     #jaccard_matrix = pd.pivot_table(jaccard_table, values='Distance', index=['SampleA', 'SampleB'], fill_value=1.0)
     #print(jaccard_matrix.shape)
@@ -145,14 +151,19 @@ def pairwise_to_distance(jaccard_list):
     jaccard_matrix = DistanceMatrix(jaccard_matrix, samples)
     newick_str = nj(jaccard_matrix, result_constructor=str)
     print(newick_str)
-    tree = Tree(newick_str)
-    tree.set_outgroup(tree&"PlasmoDB-41_Pgallinaceum8A_Genome")
-    print(tree)
+    newick_file = open('{0}.nwk'.format(output), 'w')
+    newick_file.write('{0}\n'.format(newick_str))
+    newick_file.close()
+    #tree = Tree(newick_str)
+    #tree.set_outgroup(tree&'B11244O')
+    #print(tree)
     #np.savetxt('Plasmodium.dist', jaccard_matrix, delimiter=',')
     #print(jaccard_matrix.shape)
 
 if __name__ == '__main__':
     ref_path = os.path.abspath(sys.argv[1])
+    out_name = os.path.abspath(sys.argv[2])
+    outgroup = os.path.abspath(sys.argv[3])
     #fone_path = sys.argv[2]
     #ftwo_path = sys.argv[3]
     #Creating logger for nest
@@ -170,5 +181,5 @@ if __name__ == '__main__':
     #out_file = index(ref_path)
     #intersection, union, jaccard  = merge((fone_path, ftwo_path))
     jaccard_list = splitter(ref_path)
-    pairwise_to_distance(jaccard_list)
+    pairwise_to_distance(jaccard_list, out_name, outgroup)
     #print(intersection, union, jaccard)
