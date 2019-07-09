@@ -1,0 +1,27 @@
+channels:
+  - defaults
+  - bioconda
+  - r
+
+dependencies:
+  - python=3.7
+  - pandas
+  - numpy
+  - jupyter
+  - java-jdk
+  - emboss
+  - sra-tools
+  - matplotlib
+  - seaborn
+  - memory_profiler
+  - samtools
+  - sra-tools
+  - scikit-learn
+  - scikit-bio
+  - mash
+  - fastani
+  - bwa
+  - muscle
+  - mummer4
+  - blast
+
