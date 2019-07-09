@@ -3,11 +3,16 @@ import re
 import sys
 import glob
 import math
+import time
+import shutil
 import logging
-import unittest 
+import unittest
+import itertools 
 import subprocess
 import numpy as np 
 import pandas as pd 
+from skbio.tree import nj
+from skbio import DistanceMatrix
 from multiprocessing import Pool
 from collections import namedtuple
 from flock.fasta import Fasta
@@ -57,7 +62,7 @@ class Index:
         if type(self.inp_path) is list:
             #Group files together, handle R1 and R2
             filenames = self.inp_path
-            study = self.groupFiles(filenames)
+            study = self.groupFiles(sorted(filenames))
         elif type(self.inp_path) is str:
             if os.path.isfile(self.inp_path):
                 #The file is either a SRA accession list
@@ -76,7 +81,7 @@ class Index:
                         else:
                             #log a warning that file is being skipped
                             self.log.warning('{0} is not a valid FASTQ/FASTA file'.format(filename))
-                study = self.groupFiles(filenames)
+                study = self.groupFiles(sorted(filenames))
         else:
             #Generate expection as inputs dont match accepted format
             raise SystemExit('{0} is not a valid FASTQ/FASTA file'.format(filename))
@@ -102,7 +107,7 @@ class Index:
                 sample = filename.split('.', 1)[0]
                 study[sample] = [files]
             elif ext in fastq_ext:
-                sample_regex = re.compile('_r1|_r2|_?l001|_?l002|_?l003|_?l004|_R1|_R2|_L001|_?L002|_L003|_L004|_1|_2') #|L001|L002|L003|L004')
+                sample_regex = re.compile('_r1|_r2|_?l001|_?l002|_?l003|_?l004|_R1|_R2|_L001|_L002|_L003|_L004|_1|_2') #|L001|L002|L003|L004')
                 basename = filename.split('.', 1)[0]
                 sample = sample_regex.split(basename)[0]
                 try:
@@ -187,11 +192,11 @@ class Index:
             os.mkdir(temp_loc)
         fq_ext = ['fq', 'fq.gz', 'fastq', 'fastq.gz']
         if files[0].split('.', 1) in fq_ext:
-            kcmd = ['lib/kanalyze/count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
+            kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
                     '-c', 'kmercount:2', '-rcanonical', '--seqfilter' , 'sanger:20', 
                     '--temploc', temp_loc, '-o', out_file] +  files 
         else:
-            kcmd = ['lib/kanalyze/count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
+            kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
                     '--temploc', temp_loc, '-o', out_file] + files
         krun = subprocess.Popen(kcmd, stderr=subprocess.DEVNULL, 
                                 stdout=subprocess.DEVNULL, shell=False)
@@ -201,6 +206,7 @@ class Index:
             self.log.error(' '.join(kcmd))
             return(out_file, 1)
         else:
+            shutil.rmtree(temp_loc)
             self.log.info('K-mer index generated for {0}'.format(sample))
         return(out_file, krun.returncode)
 
@@ -213,3 +219,92 @@ class Index:
         index_files = pool.map(self.runKanalyze, zip(samples, files))
         return(index_files)
 
+class Cluster:
+
+    def __init__(self, dkc_path, out_path, kmer=31, threads=4, study=None):
+        self.dkc_path = os.path.abspath(dkc_path)
+        self.out_path = os.path.abspath(out_path)
+        self.kmer = kmer 
+        self.threads = threads
+        if study is None:
+            self.study = 'Gentoo_{0}'.format(int(time.time()))
+        self.log = logging.getLogger('Gentoo.Cluster')
+
+    def splitter(self):
+        file_list = glob.glob('{0}/*.dkc'.format(self.dkc_path))
+        products = list()
+        combinations = list(itertools.combinations_with_replacement(file_list, 2))
+        self.log.debug('Performing {0} pairwise comparisons'.format(len(combinations)))
+        pools = Pool(self.threads)
+        jaccard_list = pools.map(self.merge, combinations)
+        for groups in jaccard_list:
+            products.append(list(groups))
+            if [groups[1], groups[0], groups[2]] not in products:
+                products.append([groups[1], groups[0], groups[2]])
+        return(products)
+
+    def stream(self, kmer_file):
+        kmer_reader = open(kmer_file)
+        for lines in kmer_reader:
+            lines = lines.strip().split('\t')
+            kmer = int(lines[0])
+            count = int(lines[1])
+            yield(kmer, count)
+
+    def merge(self, file_list):
+        fone = file_list[0]
+        ftwo = file_list[1]
+        oname = os.path.splitext(os.path.basename(fone))[0]
+        tname = os.path.splitext(os.path.basename(ftwo))[0]
+        merge_logger = logging.getLogger('Gentoo.{0}.{1}'.format(oname, tname))
+        ostream = self.stream(fone)
+        tstream = self.stream(ftwo)
+        omer = next(ostream, None)
+        tmer = next(tstream, None)
+        #Change jaccard to similarity ratio that accounts for abundance
+        #Chaning to jaccard index
+        intersection = 0
+        union = 0
+        while omer and tmer:
+            if omer[0] == tmer[0]:
+                intersection += min(omer[1], tmer[1])
+                union += max(omer[1], tmer[1])
+                omer = next(ostream, None)
+                tmer = next(tstream, None)
+            elif omer[0] < tmer[0]:
+                union += omer[1]
+                omer = next(ostream, None)
+            elif omer[0] > tmer[0]:
+                union += tmer[1]
+                tmer = next(tstream, None)
+        while omer:
+            union += omer[1]
+            omer = next(ostream, None)
+        while tmer:
+            union += tmer[1]
+            tmer = next(tstream, None)
+        ## Since a jaccard index depends on just binary presence or absence scenarios,
+        ## the similarity of samples can be determine by using a similarity ratio
+        ## given by
+        ## SRij =  kykiykj / ( kyki2 +  kykj2 -  kykiykj), where
+        ##  yki = abundance of kth species in quadrat i
+        similarity = intersection/union
+        distance = 1 - similarity
+        merge_logger.debug('Distance between {0} and {1} = {2}'.format(
+                        oname, tname, distance))
+        return(oname, tname, distance)
+
+    def pairwiseToDist(self, outgroup=None):
+        jaccard_list = self.splitter()
+        dist_file = '{0}/{1}.dist'.format(self.out_path, self.study)
+        newick_file = '{0}/{1}.nwk'.format(self.out_path, self.study)
+        jaccard_table = pd.DataFrame(jaccard_list, columns=['SampleA', 'SampleB', 'Distance'])
+        jaccard_table.to_csv(dist_file, header=True, index=False)
+        jaccard_matrix = jaccard_table.pivot(index='SampleA', columns='SampleB', values='Distance')
+        samples = jaccard_matrix.index
+        jaccard_matrix = jaccard_matrix.to_numpy()
+        jaccard_matrix = DistanceMatrix(jaccard_matrix, samples)
+        newick_str = nj(jaccard_matrix, result_constructor=str)
+        newick_file = open(newick_file, 'w')
+        newick_file.write('{0}\n'.format(newick_str))
+        newick_file.close()
