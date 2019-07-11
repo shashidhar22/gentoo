@@ -6,18 +6,75 @@ import math
 import time
 import shutil
 import logging
+import argparse
 import unittest
 import itertools 
 import subprocess
 import numpy as np 
 import pandas as pd 
 from skbio.tree import nj
+from itertools import repeat
 from skbio import DistanceMatrix
 from multiprocessing import Pool
 from collections import namedtuple
 from flock.fasta import Fasta
 from flock.fastq import Fastq
 
+def sraDownload(arguments):
+    """Given a sra accession number, download file using fastq-dump and return returncode.
+
+    Parameter list:
+        sra = SRA accession number
+    
+    Return value:
+        returncode if fastq-dump ran successfully, else will raise SystemExit exception
+    """
+    sra = arguments[0]
+    out_path = arguments[1]
+    logger = logging.getLogger('Gentooo.sra')
+    logger.debug('Downloading : {0}'.format(sra))
+    out_dir = '{0}/Fastq'.format(out_path)
+    fqd_cmd = ['fastq-dump', '--gzip', '--split-3', '-O', out_dir, sra]
+    fqd_run = subprocess.Popen(fqd_cmd, shell=False,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+    fqd_run.wait()
+    if fqd_run.returncode != 0:
+        #self.log.error(' '.join(fqd_cmd))
+        raise SystemExit('Could not download {0}, check accession number and try again'.format(sra))
+    else:
+        logger.info('Downladed complete: {0}'.format(sra))
+    return(fqd_run.returncode)
+
+def runKanalyze(arguments):
+    sample = arguments[0]
+    files = arguments[1]
+    out_path = arguments[2]
+    temp_path = arguments[3]
+    out_file = '{0}/Dkc/{1}.dkc'.format(self.out_path, sample)
+    temp_loc = '{0}/Dkc/{1}_tmp'.format(self.temp_path, sample)
+    logger = logging.getLogger('Gentoo.kanalyze')
+    if not os.path.exists(temp_loc):
+        os.mkdir(temp_loc)
+    fq_ext = ['fq', 'fq.gz', 'fastq', 'fastq.gz']
+    if files[0].split('.', 1) in fq_ext:
+        kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
+                '-c', 'kmercount:2', '-rcanonical', '--seqfilter' , 'sanger:20', 
+                '--temploc', temp_loc, '-o', out_file] +  files 
+    else:
+        kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
+                '--temploc', temp_loc, '-o', out_file] + files
+    krun = subprocess.Popen(kcmd, stderr=subprocess.DEVNULL, 
+                            stdout=subprocess.DEVNULL, shell=False)
+    krun.wait()
+    if krun.returncode != 0:
+        logger.error('Failed to index {0}, check input files and try again'.format(sample))
+        logger.error(' '.join(kcmd))
+        return(out_file, 1)
+    else:
+        shutil.rmtree(temp_loc)
+        logger.info('K-mer index generated for {0}'.format(sample))
+    return(out_file, krun.returncode)
 
 class Index:
 
@@ -151,7 +208,7 @@ class Index:
                     except KeyError:
                         study[sample] = [rone, rtwo]
         pool = Pool(self.threads)
-        sra_runs = pool.map(self.sraDownload, sra_list)
+        sra_runs = pool.map(sraDownload, zip(sra_list, repeat(self.out_path)))
         for sample, file_list in study.items():
             final_list = list()
             for files in file_list:
@@ -160,64 +217,65 @@ class Index:
             study[sample] = final_list
         return(study)
 
-    def sraDownload(self, sra):
-        """Given a sra accession number, download file using fastq-dump and return returncode.
-
-        Parameter list:
-            sra = SRA accession number
-        
-        Return value:
-            returncode if fastq-dump ran successfully, else will raise SystemExit exception
-        """
-        self.log.debug('Downloading : {0}'.format(sra))
-        out_dir = '{0}/Fastq'.format(self.out_path)
-        fqd_cmd = ['fastq-dump', '--gzip', '--split-3', '-O', out_dir, sra]
-        fqd_run = subprocess.Popen(fqd_cmd, shell=False,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE)
-        fqd_run.wait()
-        if fqd_run.returncode != 0:
-            #self.log.error(' '.join(fqd_cmd))
-            raise SystemExit('Could not download {0}, check accession number and try again'.format(sra))
-        else:
-            self.log.info('Downladed complete: {0}'.format(sra))
-        return(fqd_run.returncode)
-
-    def runKanalyze(self, arguments):
-        sample = arguments[0]
-        files = arguments[1]
-        out_file = '{0}/Dkc/{1}.dkc'.format(self.out_path, sample)
-        temp_loc = '{0}/Dkc/{1}_tmp'.format(self.temp_path, sample)
-        if not os.path.exists(temp_loc):
-            os.mkdir(temp_loc)
-        fq_ext = ['fq', 'fq.gz', 'fastq', 'fastq.gz']
-        if files[0].split('.', 1) in fq_ext:
-            kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
-                    '-c', 'kmercount:2', '-rcanonical', '--seqfilter' , 'sanger:20', 
-                    '--temploc', temp_loc, '-o', out_file] +  files 
-        else:
-            kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
-                    '--temploc', temp_loc, '-o', out_file] + files
-        krun = subprocess.Popen(kcmd, stderr=subprocess.DEVNULL, 
-                                stdout=subprocess.DEVNULL, shell=False)
-        krun.wait()
-        if krun.returncode != 0:
-            self.log.error('Failed to index {0}, check input files and try again'.format(sample))
-            self.log.error(' '.join(kcmd))
-            return(out_file, 1)
-        else:
-            shutil.rmtree(temp_loc)
-            self.log.info('K-mer index generated for {0}'.format(sample))
-        return(out_file, krun.returncode)
-
     def createIndex(self):
         study = self.prep()
         samples = list(study.keys())
         files = list(study.values())
         threads = self.threads //2 if self.threads > 1 else 1
         pool = Pool(threads)
-        index_files = pool.map(self.runKanalyze, zip(samples, files))
+        index_files = pool.map(runKanalyze, zip(samples, files, repeat(self.out_path), repeat(self.temp_path)))
         return(index_files)
+
+def stream(kmer_file):
+    kmer_reader = open(kmer_file)
+    for lines in kmer_reader:
+        lines = lines.strip().split('\t')
+        kmer = int(lines[0])
+        count = int(lines[1])
+        yield(kmer, count)
+
+def merge(file_list):
+    fone = file_list[0]
+    ftwo = file_list[1]
+    oname = os.path.splitext(os.path.basename(fone))[0]
+    tname = os.path.splitext(os.path.basename(ftwo))[0]
+    merge_logger = logging.getLogger('Gentoo.{0}.{1}'.format(oname, tname))
+    ostream = stream(fone)
+    tstream = stream(ftwo)
+    omer = next(ostream, None)
+    tmer = next(tstream, None)
+    #Change jaccard to similarity ratio that accounts for abundance
+    #Chaning to jaccard index
+    intersection = 0
+    union = 0
+    while omer and tmer:
+        if omer[0] == tmer[0]:
+            intersection += min(omer[1], tmer[1])
+            union += max(omer[1], tmer[1])
+            omer = next(ostream, None)
+            tmer = next(tstream, None)
+        elif omer[0] < tmer[0]:
+            union += omer[1]
+            omer = next(ostream, None)
+        elif omer[0] > tmer[0]:
+            union += tmer[1]
+            tmer = next(tstream, None)
+    while omer:
+        union += omer[1]
+        omer = next(ostream, None)
+    while tmer:
+        union += tmer[1]
+        tmer = next(tstream, None)
+    ## Since a jaccard index depends on just binary presence or absence scenarios,
+    ## the similarity of samples can be determine by using a similarity ratio
+    ## given by
+    ## SRij =  kykiykj / ( kyki2 +  kykj2 -  kykiykj), where
+    ##  yki = abundance of kth species in quadrat i
+    similarity = intersection/union
+    distance = 1 - similarity
+    merge_logger.debug('Distance between {0} and {1} = {2}'.format(
+                    oname, tname, distance))
+    return(oname, tname, distance)
 
 class Cluster:
 
@@ -236,63 +294,12 @@ class Cluster:
         combinations = list(itertools.combinations_with_replacement(file_list, 2))
         self.log.debug('Performing {0} pairwise comparisons'.format(len(combinations)))
         pools = Pool(self.threads)
-        jaccard_list = pools.map(self.merge, combinations)
+        jaccard_list = pools.map(merge, combinations)
         for groups in jaccard_list:
             products.append(list(groups))
             if [groups[1], groups[0], groups[2]] not in products:
                 products.append([groups[1], groups[0], groups[2]])
         return(products)
-
-    def stream(self, kmer_file):
-        kmer_reader = open(kmer_file)
-        for lines in kmer_reader:
-            lines = lines.strip().split('\t')
-            kmer = int(lines[0])
-            count = int(lines[1])
-            yield(kmer, count)
-
-    def merge(self, file_list):
-        fone = file_list[0]
-        ftwo = file_list[1]
-        oname = os.path.splitext(os.path.basename(fone))[0]
-        tname = os.path.splitext(os.path.basename(ftwo))[0]
-        merge_logger = logging.getLogger('Gentoo.{0}.{1}'.format(oname, tname))
-        ostream = self.stream(fone)
-        tstream = self.stream(ftwo)
-        omer = next(ostream, None)
-        tmer = next(tstream, None)
-        #Change jaccard to similarity ratio that accounts for abundance
-        #Chaning to jaccard index
-        intersection = 0
-        union = 0
-        while omer and tmer:
-            if omer[0] == tmer[0]:
-                intersection += min(omer[1], tmer[1])
-                union += max(omer[1], tmer[1])
-                omer = next(ostream, None)
-                tmer = next(tstream, None)
-            elif omer[0] < tmer[0]:
-                union += omer[1]
-                omer = next(ostream, None)
-            elif omer[0] > tmer[0]:
-                union += tmer[1]
-                tmer = next(tstream, None)
-        while omer:
-            union += omer[1]
-            omer = next(ostream, None)
-        while tmer:
-            union += tmer[1]
-            tmer = next(tstream, None)
-        ## Since a jaccard index depends on just binary presence or absence scenarios,
-        ## the similarity of samples can be determine by using a similarity ratio
-        ## given by
-        ## SRij =  kykiykj / ( kyki2 +  kykj2 -  kykiykj), where
-        ##  yki = abundance of kth species in quadrat i
-        similarity = intersection/union
-        distance = 1 - similarity
-        merge_logger.debug('Distance between {0} and {1} = {2}'.format(
-                        oname, tname, distance))
-        return(oname, tname, distance)
 
     def pairwiseToDist(self, outgroup=None):
         jaccard_list = self.splitter()
@@ -308,3 +315,33 @@ class Cluster:
         newick_file = open(newick_file, 'w')
         newick_file.write('{0}\n'.format(newick_str))
         newick_file.close()
+
+
+if __name__ == '__main__':
+
+    #Get arguments
+    parsers = argparse.ArgumentParser(prog='Gentoo')
+    parsers.add_argument('-i', '--inp_path', type=str,
+                         help='Path to input file or directory')
+    parsers.add_argument('-o', '--out_path', type=str,
+                         help='Path to output directory')
+    parsers.add_argument('-t', '--tmp_path', type=str, default=None,
+                         help='Path to temp directory')
+    parsers.add_argument('-p', '--threads', type=int, default=5,
+                         help='Number of threads used for analysis')
+    parsers.add_argument('-k', '--ksize', type=int, default=31,
+                         help='K-mer size used for analysis')
+    parsers.add_argument('-s', '--study', type=str, default=None,
+                         help='Study name')
+    parsers.add_argument('--index', action='store_true', 
+                         help='Create KC index files')
+    parsers.add_argument('--cluster', action='store_true',
+                         help='Create distance matrix from indexed files')
+    args = parsers.parse_args()
+
+    #Index code
+    if args.index:
+       indexer = Index(args.inp_path, args.out_path, args.threads, args.ksize, args.tmp_path)
+       index_files = indexer.createIndex()
+
+
