@@ -1,0 +1,13 @@
+library(Finch)
+library(MASS)
+library(optparse)
+option_list = list(
+    make_option(c('-i', '--input_path'), type='character', default=NULL, 
+                help='Input path'),
+    make_option(c('-o', '--output_path'), type='character', default=NULL,
+                help='Output file name'));
+opt_parser = OptionParser(option_list=option_list);
+opt = parse_args(opt_parser);
+
+finch <- Finch.dif(31, opt$input_path)
+write.matrix(finch, file=opt$output_path, sep=',')

@@ -34,6 +34,10 @@ def sraDownload(arguments):
     logger = logging.getLogger('Gentooo.sra')
     logger.debug('Downloading : {0}'.format(sra))
     out_dir = '{0}/Fastq'.format(out_path)
+    out_files = ['{0}/{1}_1.fastq.gz'.format(out_dir, sra), '{0}/{1}_2.fastq.gz'.format(out_dir, sra)]
+    if os.path.exists(out_files[0]) and os.path.exists(out_files[1]):
+       logger.info('Samples exists {0}'.format(sra))
+       return(0)
     fqd_cmd = ['fastq-dump', '--gzip', '--split-3', '-O', out_dir, sra]
     fqd_run = subprocess.Popen(fqd_cmd, shell=False,
                                 stdout=subprocess.PIPE,
@@ -51,18 +55,19 @@ def runKanalyze(arguments):
     files = arguments[1]
     out_path = arguments[2]
     temp_path = arguments[3]
-    out_file = '{0}/Dkc/{1}.dkc'.format(self.out_path, sample)
-    temp_loc = '{0}/Dkc/{1}_tmp'.format(self.temp_path, sample)
+    ksize = arguments[4]
+    out_file = '{0}/Dkc/{1}.dkc'.format(out_path, sample)
+    temp_loc = '{0}/Dkc/{1}_tmp'.format(temp_path, sample)
     logger = logging.getLogger('Gentoo.kanalyze')
     if not os.path.exists(temp_loc):
         os.mkdir(temp_loc)
     fq_ext = ['fq', 'fq.gz', 'fastq', 'fastq.gz']
     if files[0].split('.', 1) in fq_ext:
-        kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
-                '-c', 'kmercount:2', '-rcanonical', '--seqfilter' , 'sanger:20', 
+        kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(ksize), 
+                '-c', 'kmercount:4', '-rcanonical', '--seqfilter' , 'sanger:20', 
                 '--temploc', temp_loc, '-o', out_file] +  files 
     else:
-        kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(self.kmer), 
+        kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(ksize), 
                 '--temploc', temp_loc, '-o', out_file] + files
     krun = subprocess.Popen(kcmd, stderr=subprocess.DEVNULL, 
                             stdout=subprocess.DEVNULL, shell=False)
@@ -115,7 +120,7 @@ class Index:
         Return value:
             Dictionary with sample name as key and file list as value
         """
-        ext_list=['fa', 'fas', 'fasta', 'fq', 'fastq', 'fq.gz', 'fastq.gz']
+        ext_list=['fa', 'fna', 'fas', 'fasta', 'fq', 'fastq', 'fq.gz', 'fastq.gz']
         if type(self.inp_path) is list:
             #Group files together, handle R1 and R2
             filenames = self.inp_path
@@ -223,7 +228,7 @@ class Index:
         files = list(study.values())
         threads = self.threads //2 if self.threads > 1 else 1
         pool = Pool(threads)
-        index_files = pool.map(runKanalyze, zip(samples, files, repeat(self.out_path), repeat(self.temp_path)))
+        index_files = pool.map(runKanalyze, zip(samples, files, repeat(self.out_path), repeat(self.temp_path), repeat(self.kmer)))
         return(index_files)
 
 def stream(kmer_file):
@@ -239,7 +244,16 @@ def merge(file_list):
     ftwo = file_list[1]
     oname = os.path.splitext(os.path.basename(fone))[0]
     tname = os.path.splitext(os.path.basename(ftwo))[0]
-    merge_logger = logging.getLogger('Gentoo.{0}.{1}'.format(oname, tname))
+    merge_logger = logging.getLogger('Gentoo')
+    #Creating logger for nest
+    merge_logger.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    # Create formatter and add it to the handlers
+    formatter = logging.Formatter('{asctime} - {name} - {levelname} - {message}', style="{")
+    ch.setFormatter(formatter)
+    # Add the handlers to the logger
+    merge_logger.addHandler(ch)
     ostream = stream(fone)
     tstream = stream(ftwo)
     omer = next(ostream, None)
@@ -273,8 +287,8 @@ def merge(file_list):
     ##  yki = abundance of kth species in quadrat i
     similarity = intersection/union
     distance = 1 - similarity
-    merge_logger.debug('Distance between {0} and {1} = {2}'.format(
-                    oname, tname, distance))
+    #print('Distance between {0} and {1} = {2}'.format(
+    #                oname, tname, distance))
     return(oname, tname, distance)
 
 class Cluster:
@@ -286,6 +300,8 @@ class Cluster:
         self.threads = threads
         if study is None:
             self.study = 'Gentoo_{0}'.format(int(time.time()))
+        else:
+            self.study = study
         self.log = logging.getLogger('Gentoo.Cluster')
 
     def splitter(self):
@@ -293,8 +309,10 @@ class Cluster:
         products = list()
         combinations = list(itertools.combinations_with_replacement(file_list, 2))
         self.log.debug('Performing {0} pairwise comparisons'.format(len(combinations)))
+        print('Performing {0} pairwise comparisons'.format(len(combinations)))
         pools = Pool(self.threads)
         jaccard_list = pools.map(merge, combinations)
+        print('Pairwise comparisons completed')
         for groups in jaccard_list:
             products.append(list(groups))
             if [groups[1], groups[0], groups[2]] not in products:
@@ -310,6 +328,7 @@ class Cluster:
         jaccard_matrix = jaccard_table.pivot(index='SampleA', columns='SampleB', values='Distance')
         samples = jaccard_matrix.index
         jaccard_matrix = jaccard_matrix.to_numpy()
+        #jaccard_matrix = np.asmatrix(jaccard_matrix)
         jaccard_matrix = DistanceMatrix(jaccard_matrix, samples)
         newick_str = nj(jaccard_matrix, result_constructor=str)
         newick_file = open(newick_file, 'w')
@@ -344,4 +363,6 @@ if __name__ == '__main__':
        indexer = Index(args.inp_path, args.out_path, args.threads, args.ksize, args.tmp_path)
        index_files = indexer.createIndex()
 
-
+    if args.cluster:
+       cluster = Cluster(args.inp_path, args.out_path, args.ksize, args.threads, args.study)
+       cluster.pairwiseToDist()

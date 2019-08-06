@@ -4,8 +4,9 @@ channels:
   - r
 
 dependencies:
-  - python=3.7
-  - pandas
+  - python=3.6
+  - r
+  - pandas=0.24.2
   - numpy
   - jupyter
   - java-jdk
