@@ -62,9 +62,9 @@ def runKanalyze(arguments):
     if not os.path.exists(temp_loc):
         os.mkdir(temp_loc)
     fq_ext = ['fq', 'fq.gz', 'fastq', 'fastq.gz']
-    if files[0].split('.', 1) in fq_ext:
+    if files[0].split('.', 1)[1] in fq_ext:
         kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(ksize), 
-                '-c', 'kmercount:4', '-rcanonical', '--seqfilter' , 'sanger:20', 
+                '-c', 'kmercount:5', '-rcanonical', '--seqfilter' , 'sanger:20', 
                 '--temploc', temp_loc, '-o', out_file] +  files 
     else:
         kcmd = ['java', '-jar', 'lib/kanalyze/kanalyze.jar', 'count', '-t', '2', '-m', 'dec', '-k', str(ksize), 
